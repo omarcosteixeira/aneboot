@@ -53,6 +53,12 @@ async function Bot() {
             console.clear(); 
             console.log(`==========================================\nAPONTE O WHATSAPP PARA O QR CODE\n==========================================`);
             qrcode.generate(qr, { small: true });
+            
+            // NOVA SOLUÇÃO: Gera um link direto para ver o QR Code como imagem limpa
+            const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`;
+            console.log(`\n⚠️ SE O QR CODE ACIMA ESTIVER DISTORCIDO, ABRA O LINK ABAIXO NO SEU NAVEGADOR:`);
+            console.log(linkQrCode);
+            console.log(`==========================================`);
         }
 
         //Não houve conexão
