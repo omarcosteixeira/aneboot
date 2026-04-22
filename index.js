@@ -141,10 +141,10 @@ const flow = {
                 ...sessao.chat
             ];
 
-            // 4. Chama a API do Groq (Utilizando o Llama 3 - 8B, rápido e muito inteligente)
+            // 4. Chama a API do Groq (Utilizando o Llama 3.1 - 8B, rápido e muito inteligente)
             const chatCompletion = await groq.chat.completions.create({
                 messages: mensagensParaIA,
-                model: "llama3-8b-8192", 
+                model: "llama-3.1-8b-instant", // <-- Modelo corrigido aqui
                 temperature: 0.6, // Define a criatividade (0.0 a 1.0)
                 max_tokens: 500,  // Tamanho máximo da resposta
             });
