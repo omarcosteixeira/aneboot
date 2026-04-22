@@ -5,9 +5,9 @@ const qrcode = require('qrcode-terminal');
 require('dotenv').config(); // Adicionado para ler o arquivo .env
 const { Groq } = require('groq-sdk'); // Adicionado o SDK do Groq
 
-// Inicializa a conexão com o Groq usando a chave do .env
+// Inicializa a conexão com o Groq usando a chave do .env ou a chave direta (localmente)
 const groq = new Groq({
-    apiKey: "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"
+    apiKey: process.env.GROQ_API_KEY || "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"
 });
 
 // =====================================================================
