@@ -1,42 +1,123 @@
-//#region Whatsapp
+//#region Whatsapp & Servidor
 
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, delay, toNumber } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
-require('dotenv').config(); // Adicionado para ler o arquivo .env
-const { Groq } = require('groq-sdk'); // Adicionado o SDK do Groq
+require('dotenv').config(); 
+const { Groq } = require('groq-sdk');
+const express = require('express'); // Adicionado Express para comunicação com o site
 
-// Inicializa a conexão com o Groq usando a chave do .env ou a chave direta (localmente)
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY || "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"
 });
 
+// Inicialização do Servidor Web
+const app = express();
+app.use(express.json()); // Permite receber dados JSON do seu site
+
+// Variável global para controlar se a IA deve responder (Controlada pelo seu painel)
+let iaHabilitada = true; 
+
 // =====================================================================
-// 🧠 CAMPO DE TREINAMENTO DA IA (PROMPT DE SISTEMA)
-// Edite este texto com todas as informações sobre a sua empresa!
+// 🧠 CAMPO DE TREINAMENTO DA IA
 // =====================================================================
-const INFORMACOES_EMPRESA = `Você é a Ane, a assistente virtual inteligente do nosso ateliê.
+const INFORMACOES_EMPRESA = `Você é a Ane, a assistente virtual inteligente do nosso ateliê "Personalize Mais".
 Sua missão é atender os clientes de forma educada, prestativa e natural, com um tom acolhedor, como um humano faria.
 
-Aqui estão as informações do nosso ateliê para você usar nas respostas:
-- O que fazemos: [Papelaria Personalizada ( caderneta do sus, Cadernos, Agendas), Personalizados de festa ( Convites digitais e Impressos, Banner, Imãs, e outros personalizados, peças exclusivas em EVA, Materiais Gráficos para empresas (Banner, Cartões de visita, Adesivos, e muito mais) ].
-- Horário de Atendimento: [Ex: Segunda a Sexta, das 09h às 18h].
-- Endereço: [Ex: Rua Avenida João Pedro Segundo, 684, Camorim Grande - Angra dps Reis].
-- Preços/Catálogo: [Adicione aqui links para o Instagram (https://www.instagram.com/atelie.arianeartes) ou faixas de preço].
-- Prazos de entrega: [Ex: Pedidos sob medida levam em média 15 dias].
+Aqui estão as informações base do nosso ateliê:
+- Site Oficial: https://personalizemais.vercel.app
+- Horário de Atendimento: Segunda a Sexta, das 09h às 18h.
 
 Regras que você DEVE seguir:
-1. Seja sempre amigável, criativa, não repita palavras.
+1. Seja sempre amigável, criativa e use emojis de forma moderada e fofa (ex: 🧵, ✨, ✂️, 💖).
 2. Mantenha as respostas curtas e objetivas, ideais para o WhatsApp.
-3. Nunca invente informações. Se o cliente perguntar algo que não está nas suas informações, diga que vai verificar e pedir para a responsável do ateliê entrar em contato em breve.`;
+3. Se o cliente perguntar sobre produtos, preços ou status, baseie-se estritamente nas "Informações em Tempo Real do Site" fornecidas abaixo.
+4. Nunca invente informações. Se o cliente perguntar algo que não sabe, diga que vai pedir para a responsável do ateliê entrar em contato em breve.`;
+
+// =====================================================================
+// 🌐 ROTAS DA API (PARA O SEU SITE VERCEL SE COMUNICAR COM O BOT)
 // =====================================================================
 
+// Função auxiliar para formatar o número para o padrão do WhatsApp
+function formatarNumero(numero) {
+    let num = numero.replace(/\D/g, ''); // Remove tudo que não for número
+    if (!num.startsWith('55')) num = '55' + num; // Adiciona DDI do Brasil se faltar
+    return num + '@s.whatsapp.net';
+}
+
+// 1. Rota para LIGAR / DESLIGAR a IA via Painel
+app.post('/api/config-ia', (req, res) => {
+    const { habilitar, senha } = req.body;
+    
+    // Segurança básica para evitar que outras pessoas mexam na sua IA
+    if(senha !== (process.env.API_PASSWORD || "minha_senha_secreta_123")) {
+        return res.status(401).json({ erro: "Senha incorreta" });
+    }
+
+    iaHabilitada = habilitar;
+    console.log(`[PAINEL] Status da IA alterado para: ${iaHabilitada ? 'LIGADA' : 'DESLIGADA'}`);
+    res.json({ sucesso: true, iaHabilitada });
+});
+
+// 2. Rota para Enviar Mensagens (Status de Pedidos ou Prospectos)
+app.post('/api/enviar-mensagem', async (req, res) => {
+    const { telefone, mensagem, senha } = req.body;
+
+    if(senha !== (process.env.API_PASSWORD || "minha_senha_secreta_123")) {
+        return res.status(401).json({ erro: "Senha incorreta" });
+    }
+
+    if (!telefone || !mensagem) {
+        return res.status(400).json({ erro: "Telefone e mensagem são obrigatórios" });
+    }
+
+    try {
+        const numeroFormatado = formatarNumero(telefone);
+        
+        // Verifica se o WhatsApp está conectado antes de enviar
+        if (flow.sock) {
+            await flow.sock.sendMessage(numeroFormatado, { text: mensagem });
+            console.log(`[PAINEL] Mensagem enviada para ${telefone}`);
+            res.json({ sucesso: true, mensagem: "Enviado com sucesso pelo Bot!" });
+        } else {
+            res.status(503).json({ erro: "Bot do WhatsApp não está conectado no momento." });
+        }
+    } catch (error) {
+        console.error("Erro ao enviar mensagem via API:", error);
+        res.status(500).json({ erro: "Falha ao enviar a mensagem" });
+    }
+});
+
+// Iniciando o servidor web na porta fornecida pelo Railway
+const PORTA = process.env.PORT || 3000;
+app.listen(PORTA, () => {
+    console.log(`🌐 Servidor Web do Bot rodando na porta ${PORTA}`);
+});
+
+// =====================================================================
+// 🌐 FUNÇÃO PARA BUSCAR DADOS DO SITE (Para a IA)
+// =====================================================================
+async function buscarDadosDoSite() {
+    try {
+        const urlDoSeuSite = "https://personalizemais.vercel.app/api/dados"; 
+        const resposta = await fetch(urlDoSeuSite);
+        if (resposta.ok) {
+            const dadosJson = await resposta.json();
+            return `\n\n--- INFORMAÇÕES EM TEMPO REAL DO SITE ---\n${JSON.stringify(dadosJson, null, 2)}`;
+        }
+        return ""; 
+    } catch (erro) {
+        return "";
+    }
+}
+
+// =====================================================================
+// 🤖 CORE DO WHATSAPP (BAILEYS)
+// =====================================================================
 async function Bot() {
 
-    // 1. BUSCAR A VERSÃO ATUALIZADA (EVITA O ERRO 405)
     const { version } = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState('auth/bot');
 
-    //Criando socket
     const sock = makeWASocket({
         version,
         auth: state,
@@ -48,43 +129,33 @@ async function Bot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        //gerando Qrcode
         if (qr) {
             console.clear(); 
-            console.log(`==========================================\nAPONTE O WHATSAPP PARA O QR CODE\n==========================================`);
-            qrcode.generate(qr, { small: true });
-            
-            // NOVA SOLUÇÃO: Gera um link direto para ver o QR Code como imagem limpa
             const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`;
-            console.log(`\n⚠️ SE O QR CODE ACIMA ESTIVER DISTORCIDO, ABRA O LINK ABAIXO NO SEU NAVEGADOR:`);
+            console.log(`==========================================\nAPONTE O WHATSAPP PARA O QR CODE\n==========================================`);
+            console.log(`\n⚠️ ABRA O LINK ABAIXO NO SEU NAVEGADOR PARA LER O QR CODE:`);
             console.log(linkQrCode);
             console.log(`==========================================`);
         }
 
-        //Não houve conexão
         if (connection === 'close') {
-            //Debug
             const erroCode = lastDisconnect?.error?.output?.statusCode;
             if (erroCode === 405) console.log("Erro 405 persistente. Tentando forçar nova versão...");
-        
-            //Reconexão
             const deveReconectar = erroCode !== DisconnectReason.loggedOut;
             if (deveReconectar) setTimeout(() => Bot(), 5000); 
-        
-        // Conectado
-        } else if (connection === 'open') console.log('--- CONEXÃO ESTABELECIDA COM SUCESSO ---');
+        } else if (connection === 'open') {
+            console.log('--- CONEXÃO ESTABELECIDA COM SUCESSO ---');
+        }
     });
     
     flow.sock = sock;
     sock.ev.on("messages.upsert", async m => {
 
-        //filting
         if(m.type !== "notify") return;
 
         let _new = m.messages[0];
         if(!_new.message || _new.key.fromMe || _new.key.remoteJid?.endsWith("@g.us")) return;
 
-        //user message
         await flow.core({
             Jid: _new.key.remoteJid,
             msg: _new.message?.conversation ||
@@ -104,74 +175,62 @@ async function Bot() {
 
 const flow = {
 
-    //information
     sock: null,
     sess: {},
-    version: "Ane Atendimento - Llama3 API: 0.1.0", // Alterado o nome da versão internamente
+    version: "Ane Atendimento API Integrada: 0.2.0",
 
-    //methods
     async core(_user) {
 
-        if (!_user.msg) return; // Ignora mensagens sem texto
+        if (!_user.msg) return; 
 
-        //verificando se o usuario tem sessão salva
+        // 🛑 TRAVA DO PAINEL DE ADMIN: Se a IA estiver desligada no painel, o bot não responde.
+        if (!iaHabilitada) {
+            console.log(`Mensagem recebida de ${_user.Jid}, mas a IA está DESLIGADA no painel.`);
+            return; 
+        }
+
         if(!this.sess[_user.Jid]) {
-
-            //adicionando usuario a base com histórico de chat vazio
-            this.sess[_user.Jid] = { model: "ane", chat: [] }; // Alterado de argos para ane
+            this.sess[_user.Jid] = { model: "ane", chat: [] };
         };
 
         const sessao = this.sess[_user.Jid];
-
-        // 1. Adiciona a mensagem recebida ao histórico do cliente
         sessao.chat.push({ role: "user", content: _user.msg });
 
-        // 2. Limita o histórico às últimas 15 mensagens para não sobrecarregar a memória da IA
-        if (sessao.chat.length > 15) {
-            sessao.chat.shift();
-        }
+        if (sessao.chat.length > 15) sessao.chat.shift();
 
         try {
-            // Avisa o WhatsApp que o bot está "digitando..."
             await this.sock.sendPresenceUpdate("composing", _user.Jid);
 
-            // 3. Monta o pacote de mensagens (Instruções da Empresa + Histórico de Conversa)
+            const dadosDinamicos = await buscarDadosDoSite();
+            const promptCompleto = INFORMACOES_EMPRESA + dadosDinamicos;
+
             const mensagensParaIA = [
-                { role: "system", content: INFORMACOES_EMPRESA },
+                { role: "system", content: promptCompleto },
                 ...sessao.chat
             ];
 
-            // 4. Chama a API do Groq (Utilizando o Llama 3.1 - 8B, rápido e muito inteligente)
             const chatCompletion = await groq.chat.completions.create({
                 messages: mensagensParaIA,
-                model: "llama-3.1-8b-instant", // <-- Modelo corrigido aqui
-                temperature: 0.6, // Define a criatividade (0.0 a 1.0)
-                max_tokens: 500,  // Tamanho máximo da resposta
+                model: "llama-3.1-8b-instant", 
+                temperature: 0.6, 
+                max_tokens: 500,  
             });
 
-            // 5. Pega a resposta gerada
             const respostaIA = chatCompletion.choices[0]?.message?.content || "Desculpe, não consegui processar sua solicitação agora.";
-
-            // 6. Adiciona a resposta da IA no histórico para ela lembrar do que falou
+            
             sessao.chat.push({ role: "assistant", content: respostaIA });
-
-            // 7. Envia a resposta final para o usuário no WhatsApp
             await this.send(_user.Jid, { text: respostaIA });
 
         } catch (error) {
-            console.error("Erro ao chamar o Llama/Groq:", error);
-            await this.send(_user.Jid, { text: "Opa, meu sistema de inteligência está passando por uma pequena instabilidade. Tente me mandar um 'Oi' novamente em instantes!" });
+            console.error("Erro ao chamar a IA:", error);
+            await this.send(_user.Jid, { text: "Opa, meu sistema de inteligência está passando por uma pequena instabilidade." });
         }
     },
 
     async send(_jid, _msg = {}) {
-
         await this.sock.sendPresenceUpdate("composing", _jid);
-        
-        // Correção de segurança: garante que length exista para evitar erros (NaN)
         const textLength = _msg?.text?.length || _msg?.caption?.length || 50; 
         await new Promise(resolve => setTimeout(resolve, Math.min(10000, textLength * 10)));
-
         await this.sock.sendMessage(_jid, _msg);
         await this.sock.sendPresenceUpdate('paused', _jid);
     },
