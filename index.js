@@ -17,6 +17,10 @@ app.use(express.json()); // Permite receber dados JSON do seu site
 // Variável global para controlar se a IA deve responder (Controlada pelo seu painel)
 let iaHabilitada = true; 
 
+// Novas variáveis para enviar o status e o QR Code para o painel Vercel
+let currentQR = "";
+let connectionStatus = "desconectado";
+
 // =====================================================================
 // 🧠 CAMPO DE TREINAMENTO DA IA
 // =====================================================================
@@ -87,6 +91,51 @@ app.post('/api/enviar-mensagem', async (req, res) => {
     }
 });
 
+// 3. Rota para testar se o servidor está OK (Status do Bot)
+app.get('/api/status', (req, res) => {
+    res.json({ 
+        servidor: "online", 
+        whatsapp: connectionStatus,
+        ia_habilitada: iaHabilitada
+    });
+});
+
+// 4. Rota para pegar o QR Code e exibir no painel
+app.get('/api/qrcode', (req, res) => {
+    if (!currentQR) {
+        return res.json({ qr_imagem_url: null, mensagem: "Nenhum QR Code gerado no momento. O bot pode já estar conectado." });
+    }
+    const linkImagem = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(currentQR)}`;
+    res.json({ qr_texto: currentQR, qr_imagem_url: linkImagem });
+});
+
+// 5. Rota para gerar o Código de Emparelhamento do WhatsApp
+app.post('/api/codigo-whatsapp', async (req, res) => {
+    const { telefone_bot, senha } = req.body;
+    
+    if(senha !== (process.env.API_PASSWORD || "minha_senha_secreta_123")) {
+        return res.status(401).json({ erro: "Senha incorreta" });
+    }
+
+    if (connectionStatus === "conectado") {
+        return res.status(400).json({ erro: "O bot já está conectado!" });
+    }
+
+    if (!flow.sock) {
+        return res.status(500).json({ erro: "O sistema do WhatsApp ainda está a iniciar." });
+    }
+
+    try {
+        // Remove espaços e traços, mantém apenas os números
+        let numeroLimpo = telefone_bot.replace(/\D/g, ''); 
+        const codigo = await flow.sock.requestPairingCode(numeroLimpo);
+        res.json({ sucesso: true, codigo: codigo });
+    } catch (error) {
+        console.error("Erro ao solicitar código de emparelhamento:", error);
+        res.status(500).json({ erro: "Não foi possível gerar o código. Verifique se o número está correto (com DDI)." });
+    }
+});
+
 // Iniciando o servidor web na porta fornecida pelo Railway
 const PORTA = process.env.PORT || 3000;
 app.listen(PORTA, () => {
@@ -126,29 +175,35 @@ async function Bot() {
     });
 
     sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
+sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            console.clear(); 
-            const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`;
+    if (qr) {
+        currentQR = qr; // Salva o QR gerado para o site pegar
+        connectionStatus = "aguardando_qr"; // Atualiza o status
+        console.clear(); 
+        const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`;
             console.log(`==========================================\nAPONTE O WHATSAPP PARA O QR CODE\n==========================================`);
             console.log(`\n⚠️ ABRA O LINK ABAIXO NO SEU NAVEGADOR PARA LER O QR CODE:`);
-            console.log(linkQrCode);
-            console.log(`==========================================`);
-        }
+        console.log(linkQrCode);
+        console.log(`==========================================`);
+    }
 
-        if (connection === 'close') {
-            const erroCode = lastDisconnect?.error?.output?.statusCode;
-            if (erroCode === 405) console.log("Erro 405 persistente. Tentando forçar nova versão...");
-            const deveReconectar = erroCode !== DisconnectReason.loggedOut;
-            if (deveReconectar) setTimeout(() => Bot(), 5000); 
-        } else if (connection === 'open') {
-            console.log('--- CONEXÃO ESTABELECIDA COM SUCESSO ---');
-        }
-    });
+    if (connection === 'close') {
+        currentQR = ""; // Limpa o QR se a conexão cair
+        connectionStatus = "desconectado";
+        const erroCode = lastDisconnect?.error?.output?.statusCode;
+        if (erroCode === 405) console.log("Erro 405 persistente. Tentando forçar nova versão...");
+        const deveReconectar = erroCode !== DisconnectReason.loggedOut;
+        if (deveReconectar) setTimeout(() => Bot(), 5000); 
+    } else if (connection === 'open') {
+        currentQR = ""; // Limpa o QR pois conectou com sucesso
+        connectionStatus = "conectado";
+        console.log('--- CONEXÃO ESTABELECIDA COM SUCESSO ---');
+    }
+});
     
-    flow.sock = sock;
+flow.sock = sock;
     sock.ev.on("messages.upsert", async m => {
 
         if(m.type !== "notify") return;
