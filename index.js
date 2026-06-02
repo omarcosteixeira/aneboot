@@ -5,6 +5,7 @@ const qrcode = require('qrcode-terminal');
 require('dotenv').config(); 
 const { Groq } = require('groq-sdk');
 const express = require('express'); // Adicionado Express para comunicação com o site
+const cors = require('cors'); // <-- ADICIONADO: Permite que a Vercel converse com o Render
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY || "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"
@@ -12,6 +13,7 @@ const groq = new Groq({
 
 // Inicialização do Servidor Web
 const app = express();
+app.use(cors()); // <-- ADICIONADO: Libera o acesso para qualquer site (necessário para a Vercel)
 app.use(express.json()); // Permite receber dados JSON do seu site
 
 // Variável global para controlar se a IA deve responder (Controlada pelo seu painel)
@@ -64,9 +66,12 @@ app.post('/api/config-ia', (req, res) => {
 
 // 2. Rota para Enviar Mensagens (Status de Pedidos ou Prospectos)
 app.post('/api/enviar-mensagem', async (req, res) => {
+    console.log("[API] Recebi um pedido para enviar mensagem!"); // <-- ADICIONADO: Para vermos no Log
+    
     const { telefone, mensagem, senha } = req.body;
 
     if(senha !== (process.env.API_PASSWORD || "minha_senha_secreta_123")) {
+        console.log("[API] Senha incorreta bloqueada."); // <-- ADICIONADO
         return res.status(401).json({ erro: "Senha incorreta" });
     }
 
