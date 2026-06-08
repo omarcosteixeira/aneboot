@@ -156,11 +156,17 @@ app.get('/api/qrcode/:idSessao', (req, res) => {
     res.json({ qr_texto: sessao.qr, qr_imagem_url: linkImagem });
 });
 
-// Iniciando o servidor web
+// =====================================================================
+// Iniciando o servidor web (Ajustado para Cloud - Railway/Render)
+// =====================================================================
 const PORTA = process.env.PORT || 3000;
-app.listen(PORTA, () => {
+app.listen(PORTA, '0.0.0.0', () => {
     console.log(`🌐 Servidor Web do Bot rodando na porta ${PORTA}`);
-    RestaurarSessoesSalvas(); // Tenta ligar automaticamente os WhatsApps que já foram lidos
+    try {
+        RestaurarSessoesSalvas(); // Tenta ligar automaticamente
+    } catch (erro) {
+        console.error("⚠️ Erro ao tentar restaurar sessões antigas:", erro);
+    }
 });
 
 // =====================================================================
@@ -178,9 +184,12 @@ function RestaurarSessoesSalvas() {
 
     if (pastas.length > 0) {
         console.log(`♻️ Restaurando ${pastas.length} sessões guardadas: ${pastas.join(', ')}`);
-        pastas.forEach(idSessao => IniciarWhatsApp(idSessao));
+        // Adicionamos um pequeno delay entre a ligação de múltiplos números para não estourar a memória RAM
+        pastas.forEach((idSessao, index) => {
+            setTimeout(() => IniciarWhatsApp(idSessao), index * 3000); 
+        });
     } else {
-        console.log(`ℹ️ Nenhuma sessão guardada. Use a API para iniciar um novo WhatsApp.`);
+        console.log(`ℹ️ Nenhuma sessão guardada. Use a API (Painel) para iniciar um novo WhatsApp.`);
     }
 }
 
