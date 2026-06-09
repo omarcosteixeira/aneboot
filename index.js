@@ -18,6 +18,14 @@ app.use(cors());
 app.use(express.json());
 
 // =====================================================================
+// MIDDLEWARE PARA LOGS (Ver quem tenta aceder à API)
+// =====================================================================
+app.use((req, res, next) => {
+    console.log(`[PAINEL VERCEL] A aceder à rota: ${req.method} ${req.url}`);
+    next();
+});
+
+// =====================================================================
 // 🏢 GERENCIADOR DE MÚLTIPLAS SESSÕES
 // =====================================================================
 // Esta variável vai guardar todos os WhatsApps ligados ao mesmo tempo
@@ -121,16 +129,7 @@ app.post('/api/enviar-mensagem', async (req, res) => {
             await sessao.sock.sendMessage(numeroFormatado, { text: mensagem });
             console.log(`[PAINEL] Mensagem enviada para ${telefone} através da sessão '${idSessao}'`);
             res.json({ sucesso: true, mensagem: "Enviado com sucesso!" });
-        } else {
-            res.status(503).json({ erro: `O WhatsApp da sessão '${idSessao}' não está conectado.` });
-        }
-    } catch (error) {
-        console.error("Erro ao enviar mensagem via API:", error);
-        res.status(500).json({ erro: "Falha ao enviar a mensagem" });
-    }
-});
-
-// 4. Testar o status de uma sessão
+// 4. Testar o status de uma sessão ESPECÍFICA
 app.get('/api/status/:idSessao', (req, res) => {
     const { idSessao } = req.params;
     const sessao = sessoesAtivas.get(idSessao);
@@ -141,6 +140,15 @@ app.get('/api/status/:idSessao', (req, res) => {
         idSessao: idSessao,
         whatsapp: sessao.status,
         ia_habilitada: sessao.iaHabilitada
+    });
+});
+
+// 4.1. NOVO: Testar a conexão GERAL do servidor (Ping)
+app.get('/api/ping', (req, res) => {
+    res.json({ 
+        servidor: "online", 
+        mensagem: "A conexão entre a Vercel e o Railway está perfeita! 🚀",
+        sessoes_em_memoria: Array.from(sessoesAtivas.keys())
     });
 });
 
