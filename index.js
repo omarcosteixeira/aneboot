@@ -1,5 +1,5 @@
 //#region Dependências e Configurações
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 require('dotenv').config();
 const { Groq } = require('groq-sdk');
@@ -38,7 +38,13 @@ async function IniciarSessaoWhatsApp(idSessao) {
     console.log(`[SISTEMA] Iniciando sessão: ${idSessao}`);
     
     const { version } = await fetchLatestBaileysVersion();
-    const pastaAuth = `auth/${idSessao}`;
+    const pastaAuth = path.join(__dirname, `auth/${idSessao}`);
+    
+    // Garante que a pasta existe (importante para injeção e restauração)
+    if (!fs.existsSync(pastaAuth)) {
+        fs.mkdirSync(pastaAuth, { recursive: true });
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState(pastaAuth);
 
     sessoes[idSessao] = {
@@ -52,7 +58,8 @@ async function IniciarSessaoWhatsApp(idSessao) {
         version,
         auth: state,
         printQRInTerminal: true,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        // 🛡️ ANTI-BAN TWEAK: Disfarce de Mac Desktop em vez de Ubuntu jurássico
+        browser: Browsers.macOS('Desktop'),
     });
 
     sessoes[idSessao].sock = sock;
@@ -67,7 +74,7 @@ async function IniciarSessaoWhatsApp(idSessao) {
             sessoes[idSessao].status = 'aguardando_qr';
             console.log(`\n⚠️ [${idSessao}] NOVO QR CODE GERADO!`);
             const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`;
-            console.log(`Link para ler o QR Code: ${linkQrCode}\n`);
+            console.log(`Link para ler o QR Code (Pode não funcionar devido a Passkey): ${linkQrCode}\n`);
         }
 
         if (connection === 'close') {
@@ -79,7 +86,11 @@ async function IniciarSessaoWhatsApp(idSessao) {
                 console.log(`[${idSessao}] Conexão caiu. Reconectando em 5s...`);
                 setTimeout(() => IniciarSessaoWhatsApp(idSessao), 5000);
             } else {
-                console.log(`[${idSessao}] Desconectado manualmente (Logout).`);
+                console.log(`[${idSessao}] Desconectado pelo WhatsApp (Logout ou Banimento). Limpando pasta de sessão...`);
+                // Limpeza automática se for desconectado permanentemente
+                try {
+                    fs.rmSync(pastaAuth, { recursive: true, force: true });
+                } catch(e) {}
             }
         } else if (connection === 'open') {
             sessoes[idSessao].status = 'conectado';
@@ -140,7 +151,9 @@ async function IniciarSessaoWhatsApp(idSessao) {
 //#region API Web (Express)
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 🛡️ Prevenção de Payload Too Large (Essencial para receber o JSON grande da extensão)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Middleware de Logs para aparecer no Railway
 app.use((req, res, next) => {
@@ -153,7 +166,52 @@ app.get('/api/ping', (req, res) => {
     res.json({ sucesso: true, mensagem: "Servidor online e operante!" });
 });
 
-// Iniciar uma nova sessão de WhatsApp a partir do seu painel
+// 💉 NOVA ROTA: INJEÇÃO DE SESSÃO (Bypass Passkey)
+app.post('/api/injetar-sessao', async (req, res) => {
+    const { idSessao, sessionData, senha } = req.body;
+    
+    if (senha !== SENHA_API) return res.status(401).json({ erro: "Senha incorreta" });
+    if (!idSessao || !sessionData) return res.status(400).json({ erro: "idSessao e sessionData são obrigatórios." });
+
+    const pastaAuth = path.join(__dirname, `auth/${idSessao}`);
+
+    try {
+        // 1. Limpeza Segura: Desconecta a sessão atual se existir e limpa a pasta
+        if (sessoes[idSessao] && sessoes[idSessao].sock) {
+            sessoes[idSessao].sock.end(undefined);
+            delete sessoes[idSessao];
+        }
+
+        if (fs.existsSync(pastaAuth)) {
+            fs.rmSync(pastaAuth, { recursive: true, force: true });
+        }
+        fs.mkdirSync(pastaAuth, { recursive: true });
+
+        // 2. Extração dos arquivos do JSON da Extensão PESK Linker
+        for (const [key, value] of Object.entries(sessionData)) {
+            let fileName = key;
+            if (!fileName.endsWith('.json')) {
+                fileName = `${fileName}.json`;
+            }
+            
+            const fileContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+            fs.writeFileSync(path.join(pastaAuth, fileName), fileContent);
+        }
+
+        console.log(`[INJECTOR] Chaves instaladas para ${idSessao}. Iniciando bot...`);
+
+        // 3. Inicia o Bot (que vai ler a pasta recém-preenchida)
+        IniciarSessaoWhatsApp(idSessao);
+        
+        res.json({ sucesso: true, mensagem: `Credenciais injetadas. Sessão ${idSessao} conectando ao WhatsApp nativamente.` });
+
+    } catch (error) {
+        console.error('[ERRO INJEÇÃO]:', error);
+        res.status(500).json({ erro: "Falha ao gravar arquivos de credenciais.", detalhe: error.message });
+    }
+});
+
+// Iniciar uma nova sessão de WhatsApp (Tradicional - via QR Code - MANTIDA PARA RETROCOMPATIBILIDADE)
 app.post('/api/iniciar-sessao', (req, res) => {
     const { idSessao, senha } = req.body;
     if (senha !== SENHA_API) return res.status(401).json({ erro: "Senha incorreta" });
@@ -164,7 +222,7 @@ app.post('/api/iniciar-sessao', (req, res) => {
     }
 
     IniciarSessaoWhatsApp(idSessao);
-    res.json({ sucesso: true, mensagem: `Sessão ${idSessao} iniciada. Verifique o QR Code no painel ou log.` });
+    res.json({ sucesso: true, mensagem: `Processo de inicialização começou para ${idSessao}.` });
 });
 
 // Verificar Status de uma Sessão Específica
